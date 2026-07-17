@@ -26,6 +26,7 @@ def start_fastapi_server():
     """
     Spins up the FastAPI server as a background process within the 
     Streamlit Community Cloud container env matrix, only if not already active.
+    Flushes traceback errors directly to the cloud terminal for fast debugging.
     """
     port = 8000
     print(f"🚀 [Backend Engine] start_fastapi_server() triggered. Scanning port {port}...", flush=True)
@@ -39,12 +40,13 @@ def start_fastapi_server():
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # We use non-blocking pipes to capture the error stream if a 500 crash occurs later
+        # 🎯 FIX: Passing sys.stdout and sys.stderr directly bypasses internal pipes 
+        # and flushes FastAPI runtime 500 exceptions instantly onto your dashboard console.
         process = subprocess.Popen(
             ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
             cwd=current_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
             text=True
         )
         
@@ -53,9 +55,7 @@ def start_fastapi_server():
         
         poll_status = process.poll()
         if poll_status is not None:
-            _, err_output = process.communicate()
             print(f"❌ [Backend Engine] Critical failure! Process exited immediately on boot with status code {poll_status}.", flush=True)
-            print(f"📋 [Uvicorn Boot Error Logs]:\n{err_output}", flush=True)
             return None
             
         print(f"🔥 [Backend Engine] Uvicorn worker process successfully detached into background! PID: {process.pid}", flush=True)
@@ -88,14 +88,7 @@ try:
     print(f"📡 [Health Check] Response status code received: {health_check.status_code}", flush=True)
     
     if health_check.status_code == 500:
-        print("🚨 [Health Check] Detected an HTTP 500 error! Inspecting backend process error logs...", flush=True)
-        # Attempt a non-blocking read of the stderr stream if available via the cached token reference
-        if 'fastapi_process' in globals() and fastapi_process is not None:
-            # Check if there's text waiting in the error stream buffer
-            import select
-            if select.select([fastapi_process.stderr], [], [], 1.0)[0]:
-                err_lines = fastapi_process.stderr.read()
-                print(f"📋 [FastAPI Runtime Stack Trace]:\n{err_lines}", flush=True)
+        print("🚨 [Health Check] Detected an HTTP 500 error! Check lines directly below in the terminal logs for the python traceback.", flush=True)
 except Exception as check_err:
     print(f"⚠️ [Health Check] Warning: Pre-flight connection check failed. Reason: {str(check_err)}", flush=True)
 
@@ -148,7 +141,7 @@ with header_col1:
 with header_col2:
     st.markdown("<br>", unsafe_allow_html=True)
     chat_btn_label = "❌ Close Assistant" if st.session_state.show_chat else "🤖 AI Assistant"
-    if st.button(chat_btn_label, width="stretch", type="secondary"):
+    if st.button(chat_btn_label, use_container_width=True, type="secondary"):
         st.session_state.show_chat = not st.session_state.show_chat
         st.rerun()
 
@@ -185,7 +178,7 @@ else:
 
 # Universal transactional routing context matrix (Passes UI Sheet ID to API)
 request_headers = {
-    "X-Sheet-ID": active_sheet_id,
+    "X-Sheet-ID": str(active_sheet_id),
     "Content-Type": "application/json"
 }
 
@@ -302,7 +295,7 @@ with dash_col:
     edited_df = st.data_editor(
         filtered_df,
         key="ledger_editor",
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
         height=200,  
@@ -318,7 +311,7 @@ with dash_col:
     # Process Save Action
     crud_save_col1, crud_save_col2, crud_save_col3 = st.columns([3.5, 3.5, 3])
     with crud_save_col1:
-        if st.button("💾 Save Database Changes", width="stretch", type="primary"):
+        if st.button("💾 Save Database Changes", use_container_width=True, type="primary"):
             try:
                 orig_ids = set(filtered_df["id"].dropna().astype(str).tolist())
                 new_ids = set(edited_df["id"].dropna().astype(str).tolist())
@@ -358,7 +351,7 @@ with dash_col:
             data=filtered_df.to_csv(index=False),
             file_name="expenses_export.csv",
             mime="text/csv",
-            width="stretch"
+            use_container_width=True
         )
                 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -389,7 +382,7 @@ with dash_col:
         with st.expander("🧠 Deep AI Financial Recommendations", expanded=False):
             st.markdown("<p style='font-size:0.9rem; color:#94A3B8; margin-bottom:12px;'>Click the generation action engine below to let your AI Agent parse the telemetry matrix and yield optimization vectors.</p>", unsafe_allow_html=True)
             
-            if st.button("✨ Generate Custom Recommendation Report", width="stretch", type="secondary"):
+            if st.button("✨ Generate Custom Recommendation Report", use_container_width=True, type="secondary"):
                 with st.spinner("Analyzing active data engine parameters..."):
                     telemetry_context = (
                         f"Give me actionable financial optimization recommendations based on my real-time expense data. "
@@ -437,7 +430,7 @@ if chat_col and st.session_state.show_chat:
                         if "data" in content and content["data"]:
                             data_obj = content["data"]
                             if isinstance(data_obj, list):
-                                st.dataframe(pd.DataFrame(data_obj), width="stretch", hide_index=True)
+                                st.dataframe(pd.DataFrame(data_obj), use_container_width=True, hide_index=True)
                             elif isinstance(data_obj, dict):
                                 formatted_data = {
                                     "Metrics Properties": [k.replace("_", " ").title() for k in data_obj.keys() if k != "expense_id"],
@@ -453,7 +446,7 @@ if chat_col and st.session_state.show_chat:
                                 st.table(pd.DataFrame(formatted_data))
                     elif isinstance(content, list):
                         if len(content):
-                            st.dataframe(pd.DataFrame(content), width="stretch", hide_index=True)
+                            st.dataframe(pd.DataFrame(content), use_container_width=True, hide_index=True)
                     else:
                         st.markdown(str(content))
 
