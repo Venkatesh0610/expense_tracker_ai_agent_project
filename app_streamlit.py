@@ -1,13 +1,40 @@
+import os
+import subprocess
+import time
 import requests
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import uuid
-import os
 
+# =====================================================
+# 🚀 AUTOMATED BACKEND INITIALIZATION BLOCK
+# =====================================================
+@st.cache_resource
+def start_fastapi_server():
+    """
+    Spins up the FastAPI server as a background process within the 
+    Streamlit Community Cloud container env matrix.
+    """
+    # Adjust "main:app" below if your FastAPI entry file is named differently (e.g., server:app)
+    process = subprocess.Popen(
+        ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    # Give the backend Uvicorn worker context a brief window to bind to local port 8000
+    time.sleep(2.0)
+    return process
+
+# Trigger background execution pipeline
+fastapi_process = start_fastapi_server()
+
+# Target endpoint mapping inside the local environment boundary
 API_URL = "http://127.0.0.1:8000"
 
+# =====================================================
 # 1. Page Configuration Matrix
+# =====================================================
 st.set_page_config(
     page_title="Expense Tracker AI Agent",
     page_icon="💰",

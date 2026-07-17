@@ -9,6 +9,9 @@ __pycache__/
 # Virtual Environment
 # ==========================================
 .venv/
+venv/
+ENV/
+
 # ==========================================
 # Environment Variables
 # ==========================================
@@ -56,14 +59,15 @@ logs/
 # ==========================================
 # Streamlit
 # ==========================================
-.streamlit/secrets.toml
+# Ignore the entire local metadata, cache, and secrets folder completely
+.streamlit/
 
 # ==========================================
-# Excel Database (Optional)
-# Remove this if you want to share sample data
+# Excel Database / Data Exports
 # ==========================================
 expense_tracker.xlsx
 expense_tracker.json
+*.csv
 
 # ==========================================
 # Temporary Files
