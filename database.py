@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SERVICE_ACCOUNT_ENV = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = "Sheet1"
-print("========",SERVICE_ACCOUNT_ENV,DEFAULT_SPREADSHEET_ID)
 class ExpenseDatabase:
     def __init__(self, spreadsheet_id=None):
         # Authenticate using either a file path or a raw JSON string

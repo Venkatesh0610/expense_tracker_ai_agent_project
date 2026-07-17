@@ -1,44 +1,31 @@
+# backend_agent.py
 import os
 import json
 import logging
-import streamlit as st  # Added Streamlit context integration
-
-from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Body, Header
+from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
+import streamlit as st
+from prompts import SYSTEM_PROMPT
+
+# Import your database module
 from database import ExpenseDatabase
 
-load_dotenv()
+# Fetch keys safely
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+DEFAULT_SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+app = FastAPI(title="Unified Expense Tracker API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-logger = logging.getLogger(__name__)
-
-# Securely extract key mapping for Streamlit Share or fallback to system environment variables
-api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-
-# Pass the API key explicitly directly to the initializer
-client = Groq(api_key=api_key)
 
 MODEL = "llama-3.3-70b-versatile"
-SYSTEM_PROMPT = """
-You are an AI Expense Tracking Assistant.
-Your responsibility is expense management, complex data analysis, and budget telemetry computations.
-
-You must help with the following tasks:
-1. Add a new expense.
-2. Show all expenses / show the latest expense.
-3. Update or delete an existing expense.
-4. Calculate total spending or category breakdowns.
-5. Perform deep mathematical calculations on historical data.
-
-CRITICAL TOOL RULES:
-• NEVER nest or chain tool calls inside one another's parameters. (e.g., Do NOT pass a function tag as a parameter value).
-• If a user asks to delete or update "the last expense" or an expense without providing an explicit ID, you MUST call `get_last_expense` or `get_expenses` FIRST in this turn. Do not try to call `delete_expense` or `update_expense` until you have received the real ID back from the tool output in the next turn.
-• Perform exact mathematical deductions based on the data provided before answering. Show your percentage calculations cleanly.
-• Never answer general knowledge, coding, or unrelated queries outside finance.
-"""
 
 TOOLS = [
     {
@@ -124,7 +111,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_analytics_summary",
-            "description": "Retrieves the complete list of all transaction records to calculate percentages, trends, top spend items, and monthly anomalies.",
+            "description": "Retrieves the complete list of all transaction records to calculate percentages, trends, and anomalies.",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     }
@@ -132,14 +119,9 @@ TOOLS = [
 
 class ExpenseAgent:
     def __init__(self, spreadsheet_id=None):
-        # Fall back to Streamlit Secrets matrix or OS environment values if none provided by front-end router
-        if not spreadsheet_id:
-            spreadsheet_id = st.secrets.get("SPREADSHEET_ID") or os.getenv("SPREADSHEET_ID")
-            
-        # Dynamically spin up a database binding for this instance context
         self.db = ExpenseDatabase(spreadsheet_id=spreadsheet_id)
-        
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.client = Groq(api_key=GROQ_API_KEY)
         self.tool_registry = {
             "add_expense": self.db.add_expense,
             "get_expenses": self.db.get_expenses,
@@ -155,7 +137,7 @@ class ExpenseAgent:
     def execute_tool(self, tool_call):
         function_name = tool_call.function.name
         arguments = tool_call.function.arguments
-
+        
         if arguments in [None, "", "null"]:
             arguments = {}
         else:
@@ -163,13 +145,11 @@ class ExpenseAgent:
 
         tool = self.tool_registry.get(function_name)
         if tool is None:
-            return {"error": f"Unknown Tool : {function_name}"}
+            return {"error": f"Unknown Tool: {function_name}"}
 
         try:
-            result = tool(**arguments)
-            return result
+            return tool(**arguments)
         except Exception as e:
-            logger.exception("Tool Execution Failed")
             return {"error": str(e)}
 
     def chat(self, user_message):
@@ -184,7 +164,7 @@ class ExpenseAgent:
         }
 
         while True:
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=MODEL,
                 messages=self.messages,
                 tools=TOOLS,
@@ -194,13 +174,11 @@ class ExpenseAgent:
             assistant_message = response.choices[0].message
 
             if not assistant_message.tool_calls:
-                final_answer = assistant_message.content or "Analysis completed successfully."
+                final_answer = assistant_message.content or "Analysis completed."
                 self.messages.append({"role": "assistant", "content": final_answer})
 
-                # --- DATA-PAYLOAD FILTERING BLOCK ---
                 if self.active_data_payload is not None and isinstance(self.active_data_payload, list):
                     normalized_text = final_answer.lower()
-                    
                     detected_month_token = None
                     for m_name, m_code in months_map.items():
                         if m_name in normalized_text:
@@ -212,7 +190,6 @@ class ExpenseAgent:
                             row for row in self.active_data_payload 
                             if "date" in row and detected_month_token in str(row["date"])
                         ]
-                    
                     elif "category" in normalized_text or any(cat.lower() in normalized_text for cat in ["food", "travel", "shopping", "bills", "entertainment"]):
                         for cat in ["food", "travel", "shopping", "bills", "entertainment", "healthcare", "education", "others"]:
                             if cat in normalized_text:
@@ -222,12 +199,10 @@ class ExpenseAgent:
                                 ]
                                 break
 
-                if self.active_data_payload is not None:
-                    return {
-                        "text": final_answer,
-                        "data": self.active_data_payload
-                    }
-                return {"text": final_answer, "data": None}
+                return {
+                    "text": final_answer,
+                    "data": self.active_data_payload
+                }
 
             self.messages.append(assistant_message)
 
@@ -246,3 +221,57 @@ class ExpenseAgent:
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(tool_result)
                 })
+
+# --- FASTAPI ENDPOINTS ---
+@app.get("/health")
+def health():
+    return {"status": "online"}
+
+@app.get("/expenses")
+def get_expenses_route(x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
+    try:
+        db = ExpenseDatabase(spreadsheet_id=sheet_id)
+        return db.get_expenses()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/expenses")
+def add_expense_route(payload: dict = Body(...), x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
+    try:
+        db = ExpenseDatabase(spreadsheet_id=sheet_id)
+        return db.add_expense(**payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/expenses/{expense_id}")
+def update_expense_route(expense_id: str, payload: dict = Body(...), x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
+    try:
+        db = ExpenseDatabase(spreadsheet_id=sheet_id)
+        return db.update_expense(expense_id=expense_id, **payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/expenses/{expense_id}")
+def delete_expense_route(expense_id: str, x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
+    try:
+        db = ExpenseDatabase(spreadsheet_id=sheet_id)
+        return db.delete_expense(expense_id=expense_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat")
+def chat_route(payload: dict = Body(...), x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    user_msg = payload.get("message")
+    sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
+    if not user_msg:
+        raise HTTPException(status_code=400, detail="Missing parameter: 'message'")
+    try:
+        agent = ExpenseAgent(spreadsheet_id=sheet_id)
+        response = agent.chat(user_msg)
+        return {"response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
