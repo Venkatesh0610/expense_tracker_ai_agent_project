@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import streamlit as st  # Added Streamlit context integration
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -14,7 +15,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-client = Groq()
+# Securely extract key mapping for Streamlit Share or fallback to system environment variables
+api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+
+# Pass the API key explicitly directly to the initializer
+client = Groq(api_key=api_key)
+
 MODEL = "llama-3.3-70b-versatile"
 SYSTEM_PROMPT = """
 You are an AI Expense Tracking Assistant.
@@ -126,7 +132,11 @@ TOOLS = [
 
 class ExpenseAgent:
     def __init__(self, spreadsheet_id=None):
-        # 💡 Dynamically spin up a database binding for this instance context
+        # Fall back to Streamlit Secrets matrix or OS environment values if none provided by front-end router
+        if not spreadsheet_id:
+            spreadsheet_id = st.secrets.get("SPREADSHEET_ID") or os.getenv("SPREADSHEET_ID")
+            
+        # Dynamically spin up a database binding for this instance context
         self.db = ExpenseDatabase(spreadsheet_id=spreadsheet_id)
         
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
