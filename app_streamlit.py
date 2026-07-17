@@ -8,12 +8,15 @@ import plotly.express as px
 import uuid
 import socket
 import sys
+import json
 from dotenv import load_dotenv
 load_dotenv()
 
 # --- DIAGNOSTIC LOG MATRIX START ---
 print("🔍 [Env Check] Fetching GOOGLE_CREDENTIALS_JSON...")
 raw_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
+DEFAULT_SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+print(f"🔍 [Env Check] Fetching DEFAULT_SPREADSHEET_ID : {DEFAULT_SPREADSHEET_ID}")
 
 if raw_env is None:
     print("❌ [Env Check] GOOGLE_CREDENTIALS_JSON is completely missing (Returned None).")
