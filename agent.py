@@ -14,7 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq()
 MODEL = "llama-3.3-70b-versatile"
 SYSTEM_PROMPT = """
 You are an AI Expense Tracking Assistant.
