@@ -6,31 +6,82 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import uuid
+import socket
+import sys
 
 # =====================================================
-# 🚀 AUTOMATED BACKEND INITIALIZATION BLOCK
+# 🚀 DIAGNOSTIC & AUTOMATED BACKEND INITIALIZATION BLOCK
 # =====================================================
+print("🔍 Streamlit Lifecycle: Initializing script execution path...", flush=True)
+
+def is_port_in_use(port: int) -> bool:
+    """Checks if a local port is already bound by a running process."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        in_use = s.connect_ex(('127.0.0.1', port)) == 0
+        print(f"📡 [Port Scanner] Checking local port {port} -> In Use: {in_use}", flush=True)
+        return in_use
+
 @st.cache_resource
 def start_fastapi_server():
     """
     Spins up the FastAPI server as a background process within the 
-    Streamlit Community Cloud container env matrix.
+    Streamlit Community Cloud container env matrix, only if not already active.
     """
-    # Adjust "main:app" below if your FastAPI entry file is named differently (e.g., server:app)
-    process = subprocess.Popen(
-        ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    # Give the backend Uvicorn worker context a brief window to bind to local port 8000
-    time.sleep(2.0)
-    return process
+    port = 8000
+    print(f"🚀 [Backend Engine] start_fastapi_server() triggered. Scanning port {port}...", flush=True)
+    
+    if is_port_in_use(port):
+        print(f"ℹ️ [Backend Engine] Port {port} already bound. Reusing existing active background worker process context.", flush=True)
+        return None
 
-# Trigger background execution pipeline
+    print(f"⚡ [Backend Engine] Port {port} is free! Attempting to launch Uvicorn background process...", flush=True)
+    
+    try:
+        # Note: We capture stdout and stderr to prevent Uvicorn logs from completely muddying the Streamlit console,
+        # but you can read them programmatically if errors arise.
+        process = subprocess.Popen(
+            ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True  # Read streams as text instead of bytes
+        )
+        
+        print("⏳ [Backend Engine] Waiting 2.0 seconds for port binding warm-up context...", flush=True)
+        time.sleep(2.0)
+        
+        # Check if the process died immediately during boot up (e.g. ModuleNotFoundError or syntax error in main.py)
+        poll_status = process.poll()
+        if poll_status is not None:
+            _, err_output = process.communicate()
+            print(f"❌ [Backend Engine] Critical failure! Process exited immediately on boot with status code {poll_status}.", flush=True)
+            print(f"📋 [Uvicorn Boot Error Logs]:\n{err_output}", flush=True)
+            return None
+            
+        print(f"🔥 [Backend Engine] Uvicorn worker process successfully detached into background! PID: {process.pid}", flush=True)
+        return process
+        
+    except Exception as launch_err:
+        print(f"❌ [Backend Engine] Exception caught while executing subprocess Popen: {str(launch_err)}", flush=True)
+        return None
+
+# Trigger background execution pipeline safely
 fastapi_process = start_fastapi_server()
 
-# Target endpoint mapping inside the local environment boundary
-API_URL = "http://127.0.0.1:8000"
+# Target endpoint mapping: fallback dynamically based on environment conditions
+if os.getenv("STREAMLIT_RUNTIME_ENV") or "STREAMLIT_SERVER_PORT" in os.environ:
+    API_URL = "http://localhost:8000"
+    print(f"🌐 [Network Route] Production Cloud Context detected. Targeting URL: {API_URL}", flush=True)
+else:
+    API_URL = "http://127.0.0.1:8000"
+    print(f"🏠 [Network Route] Local Environment context detected. Targeting URL: {API_URL}", flush=True)
+
+# Verify health status of the endpoint immediately during page load
+try:
+    print(f"📡 [Health Check] Pinging backend at {API_URL}/expenses ...", flush=True)
+    health_check = requests.get(f"{API_URL}/expenses", timeout=2)
+    print(f"✅ [Health Check] Success! Response status code: {health_check.status_code}", flush=True)
+except Exception as check_err:
+    print(f"⚠️ [Health Check] Warning: Pre-flight connection check failed. Reason: {str(check_err)}", flush=True)
 
 # =====================================================
 # 1. Page Configuration Matrix
@@ -81,7 +132,7 @@ with header_col1:
 with header_col2:
     st.markdown("<br>", unsafe_allow_html=True)
     chat_btn_label = "❌ Close Assistant" if st.session_state.show_chat else "🤖 AI Assistant"
-    if st.button(chat_btn_label, use_container_width=True, type="secondary"):
+    if st.button(chat_btn_label, width="stretch", type="secondary"):
         st.session_state.show_chat = not st.session_state.show_chat
         st.rerun()
 
@@ -235,7 +286,7 @@ with dash_col:
     edited_df = st.data_editor(
         filtered_df,
         key="ledger_editor",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         num_rows="dynamic",
         height=200,  
@@ -251,7 +302,7 @@ with dash_col:
     # Process Save Action
     crud_save_col1, crud_save_col2, crud_save_col3 = st.columns([3.5, 3.5, 3])
     with crud_save_col1:
-        if st.button("💾 Save Database Changes", use_container_width=True, type="primary"):
+        if st.button("💾 Save Database Changes", width="stretch", type="primary"):
             try:
                 orig_ids = set(filtered_df["id"].dropna().astype(str).tolist())
                 new_ids = set(edited_df["id"].dropna().astype(str).tolist())
@@ -291,7 +342,7 @@ with dash_col:
             data=filtered_df.to_csv(index=False),
             file_name="expenses_export.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
                 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -322,7 +373,7 @@ with dash_col:
         with st.expander("🧠 Deep AI Financial Recommendations", expanded=False):
             st.markdown("<p style='font-size:0.9rem; color:#94A3B8; margin-bottom:12px;'>Click the generation action engine below to let your AI Agent parse the telemetry matrix and yield optimization vectors.</p>", unsafe_allow_html=True)
             
-            if st.button("✨ Generate Custom Recommendation Report", use_container_width=True, type="secondary"):
+            if st.button("✨ Generate Custom Recommendation Report", width="stretch", type="secondary"):
                 with st.spinner("Analyzing active data engine parameters..."):
                     telemetry_context = (
                         f"Give me actionable financial optimization recommendations based on my real-time expense data. "
@@ -370,7 +421,7 @@ if chat_col and st.session_state.show_chat:
                         if "data" in content and content["data"]:
                             data_obj = content["data"]
                             if isinstance(data_obj, list):
-                                st.dataframe(pd.DataFrame(data_obj), use_container_width=True, hide_index=True)
+                                st.dataframe(pd.DataFrame(data_obj), width="stretch", hide_index=True)
                             elif isinstance(data_obj, dict):
                                 formatted_data = {
                                     "Metrics Properties": [k.replace("_", " ").title() for k in data_obj.keys() if k != "expense_id"],
@@ -386,7 +437,7 @@ if chat_col and st.session_state.show_chat:
                                 st.table(pd.DataFrame(formatted_data))
                     elif isinstance(content, list):
                         if len(content):
-                            st.dataframe(pd.DataFrame(content), use_container_width=True, hide_index=True)
+                            st.dataframe(pd.DataFrame(content), width="stretch", hide_index=True)
                     else:
                         st.markdown(str(content))
 
