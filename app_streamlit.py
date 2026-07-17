@@ -40,7 +40,7 @@ def start_fastapi_server():
         # Note: We capture stdout and stderr to prevent Uvicorn logs from completely muddying the Streamlit console,
         # but you can read them programmatically if errors arise.
         process = subprocess.Popen(
-            ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+            ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True  # Read streams as text instead of bytes
