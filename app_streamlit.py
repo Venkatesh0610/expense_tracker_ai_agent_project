@@ -8,6 +8,39 @@ import plotly.express as px
 import uuid
 import socket
 import sys
+from dotenv import load_dotenv
+load_dotenv()
+
+# --- DIAGNOSTIC LOG MATRIX START ---
+print("🔍 [Env Check] Fetching GOOGLE_CREDENTIALS_JSON...")
+raw_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
+if raw_env is None:
+    print("❌ [Env Check] GOOGLE_CREDENTIALS_JSON is completely missing (Returned None).")
+elif raw_env.strip() == "":
+    print("⚠️ [Env Check] GOOGLE_CREDENTIALS_JSON exists but is completely blank.")
+else:
+    print(f"✅ [Env Check] Raw string found! Length: {len(raw_env)} characters.")
+    try:
+        # Test if python can parse the string as valid JSON metadata
+        parsed_json = json.loads(raw_env)
+        print(f"✅ [Env Check] JSON parsing successful!")
+        print(f"📋 [Env Check] Target Project ID: {parsed_json.get('project_id')}")
+        print(f"📋 [Env Check] Target Client Email: {parsed_json.get('client_email')}")
+        
+        # Check if the private key structure is intact
+        pk = parsed_json.get("private_key", "")
+        if "-----BEGIN PRIVATE KEY-----" in pk and "-----END PRIVATE KEY-----" in pk:
+            print("✅ [Env Check] Cryptographic private key boundaries are valid.")
+        else:
+            print("❌ [Env Check] Missing header/footer boundaries inside 'private_key'.")
+            
+    except json.JSONDecodeError as e:
+        print(f"❌ [Env Check] String found, but it is NOT valid JSON. Parse Error: {e}")
+        # Print a snippet of the beginning to see what python-dotenv actually grabbed
+        print(f"📌 [Env Check] Snippet captured: {raw_env[:60]}...")
+print("----------------------------------------")
+# --- DIAGNOSTIC LOG MATRIX END ---
 
 # =====================================================
 # 🚀 DIAGNOSTIC & AUTOMATED BACKEND INITIALIZATION BLOCK
