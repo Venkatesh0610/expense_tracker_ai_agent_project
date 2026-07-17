@@ -1,5 +1,6 @@
 import os
 import uuid
+import json  # Added for parsing raw JSON strings
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
@@ -15,16 +16,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEFAULT_SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-SERVICE_ACCOUNT_FILE = "expense_tracker.json"
+SERVICE_ACCOUNT_ENV = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = "Sheet1"
-
+print("========",SERVICE_ACCOUNT_ENV,DEFAULT_SPREADSHEET_ID)
 class ExpenseDatabase:
     def __init__(self, spreadsheet_id=None):
-        creds = Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
+        # Authenticate using either a file path or a raw JSON string
+        if not SERVICE_ACCOUNT_ENV:
+            raise ValueError("❌ Error: GOOGLE_CREDENTIALS_JSON environment variable is completely empty or missing.")
 
+        try:
+            # Scenario A: Check if the string points to a physical file path layout
+            if os.path.exists(SERVICE_ACCOUNT_ENV):
+                creds = Credentials.from_service_account_file(
+                    SERVICE_ACCOUNT_ENV,
+                    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+                )
+                logger.info(f"📡 Authenticated via local keyfile path: {SERVICE_ACCOUNT_ENV}")
+            
+            # Scenario B: Assume it is a raw credentials JSON string matrix
+            else:
+                creds_info = json.loads(SERVICE_ACCOUNT_ENV)
+                creds = Credentials.from_service_account_info(
+                    creds_info,
+                    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+                )
+                logger.info("📡 Authenticated via raw GOOGLE_CREDENTIALS_JSON configuration string.")
+                
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"❌ Authentication Failed: GOOGLE_CREDENTIALS_JSON does not target a valid file path, "
+                f"nor could it be parsed as a raw JSON dictionary matrix. Value trace snippet: {SERVICE_ACCOUNT_ENV[:30]}..."
+            )
+        except Exception as auth_err:
+            raise RuntimeError(f"❌ Structural authentication error: {auth_err}")
+
+        # Build service setup downstream
         service = build(
             "sheets",
             "v4",
