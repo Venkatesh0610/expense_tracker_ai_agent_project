@@ -37,19 +37,20 @@ def start_fastapi_server():
     print(f"⚡ [Backend Engine] Port {port} is free! Attempting to launch Uvicorn background process...", flush=True)
     
     try:
-        # Note: We capture stdout and stderr to prevent Uvicorn logs from completely muddying the Streamlit console,
-        # but you can read them programmatically if errors arise.
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # We use non-blocking pipes to capture the error stream if a 500 crash occurs later
         process = subprocess.Popen(
-            ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
+            ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+            cwd=current_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True  # Read streams as text instead of bytes
+            text=True
         )
         
         print("⏳ [Backend Engine] Waiting 2.0 seconds for port binding warm-up context...", flush=True)
         time.sleep(2.0)
         
-        # Check if the process died immediately during boot up (e.g. ModuleNotFoundError or syntax error in main.py)
         poll_status = process.poll()
         if poll_status is not None:
             _, err_output = process.communicate()
@@ -78,8 +79,23 @@ else:
 # Verify health status of the endpoint immediately during page load
 try:
     print(f"📡 [Health Check] Pinging backend at {API_URL}/expenses ...", flush=True)
-    health_check = requests.get(f"{API_URL}/expenses", timeout=2)
-    print(f"✅ [Health Check] Success! Response status code: {health_check.status_code}", flush=True)
+    
+    # Emulate the baseline header matrix so the backend route doesn't crash on missing headers
+    DEMO_SHEET_ID = os.getenv("SPREADSHEET_ID")
+    test_headers = {"X-Sheet-ID": str(DEMO_SHEET_ID), "Content-Type": "application/json"}
+    
+    health_check = requests.get(f"{API_URL}/expenses", headers=test_headers, timeout=3)
+    print(f"📡 [Health Check] Response status code received: {health_check.status_code}", flush=True)
+    
+    if health_check.status_code == 500:
+        print("🚨 [Health Check] Detected an HTTP 500 error! Inspecting backend process error logs...", flush=True)
+        # Attempt a non-blocking read of the stderr stream if available via the cached token reference
+        if 'fastapi_process' in globals() and fastapi_process is not None:
+            # Check if there's text waiting in the error stream buffer
+            import select
+            if select.select([fastapi_process.stderr], [], [], 1.0)[0]:
+                err_lines = fastapi_process.stderr.read()
+                print(f"📋 [FastAPI Runtime Stack Trace]:\n{err_lines}", flush=True)
 except Exception as check_err:
     print(f"⚠️ [Health Check] Warning: Pre-flight connection check failed. Reason: {str(check_err)}", flush=True)
 
