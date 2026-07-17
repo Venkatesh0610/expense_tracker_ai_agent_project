@@ -41,7 +41,7 @@ def start_fastapi_server():
         
         # We use non-blocking pipes to capture the error stream if a 500 crash occurs later
         process = subprocess.Popen(
-            ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+            ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
             cwd=current_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
