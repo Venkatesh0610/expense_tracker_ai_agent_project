@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+openai
+python-dotenv
+streamlit
+requests
+pydantic
+groq
+google-auth
+google-api-python-client
+plotly
