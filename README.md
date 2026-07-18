@@ -5,7 +5,11 @@ An intelligent, AI-powered personal finance assistant that helps users **track, 
 **Try It:** 👉[ Personal Expense Tracker](https://expensetrackeraiagentproject-2ybcvburgqgey2zqbgs4q2.streamlit.app/)
 
 ---
+# Demonstration
 
+https://github.com/user-attachments/assets/a4d50b3b-b058-4ff8-a9a3-124e78454797
+
+---
 # 🚀 Features
 
 * 🤖 AI-powered expense tracking using natural language
