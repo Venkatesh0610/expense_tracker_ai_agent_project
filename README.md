@@ -7,7 +7,7 @@ An intelligent, AI-powered personal finance assistant that helps users **track, 
 ---
 # Demonstration
 
-https://github.com/user-attachments/assets/a4d50b3b-b058-4ff8-a9a3-124e78454797
+<img width="854" height="480" alt="demonstration_final" src="https://github.com/user-attachments/assets/9d4da3b1-df55-4f6a-863c-a6cf65175be6" />
 
 ---
 # 🚀 Features
