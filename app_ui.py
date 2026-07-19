@@ -1,10 +1,13 @@
+# app_ui.py
 import uuid
 import requests
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import os
 
-API_URL = "http://127.0.0.1:8000"
+# Adaptable URL for Local vs Cloud Deployment
+API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:8000")
 
 def render_ui(default_spreadsheet_id):
     # Initialize UI and workflow tracking keys
@@ -12,8 +15,6 @@ def render_ui(default_spreadsheet_id):
         st.session_state.show_chat = True
     if "active_user_sheet_id" not in st.session_state:
         st.session_state.active_user_sheet_id = ""
-    if "processing_chat" not in st.session_state:
-        st.session_state.processing_chat = False
         
     # PROTECTED STATE STORAGE
     if "cached_df" not in st.session_state:
@@ -87,7 +88,7 @@ def render_ui(default_spreadsheet_id):
         "Content-Type": "application/json"
     }
 
-    # Data Synchronization
+    # Data Synchronization Pipeline
     if st.session_state.needs_data_refresh or st.session_state.cached_df is None:
         try:
             response = requests.get(f"{API_URL}/expenses", headers=request_headers, timeout=5)
@@ -98,7 +99,6 @@ def render_ui(default_spreadsheet_id):
                 if expenses:
                     fresh_df = pd.DataFrame(expenses)
                     
-                    # Normalization: Ensure structural key variations match 'id' column seamlessly
                     if "expense_id" in fresh_df.columns and "id" not in fresh_df.columns:
                         fresh_df["id"] = fresh_df["expense_id"]
                     elif "id" not in fresh_df.columns:
@@ -183,7 +183,7 @@ def render_ui(default_spreadsheet_id):
             }
         )
 
-        # STATE SNIPER CACHE: Capture changes before button processing wipes out widget elements
+        # Catch UI modifications immediately into state cache
         if "ledger_editor" in st.session_state:
             latest_widget_state = st.session_state["ledger_editor"]
             if latest_widget_state.get("edited_rows") or latest_widget_state.get("added_rows") or latest_widget_state.get("deleted_rows"):
@@ -201,7 +201,7 @@ def render_ui(default_spreadsheet_id):
                 use_container_width=True
             )
 
-        # Process mutations from our protected permanent holding space
+        # Process mutations securely
         if save_clicked:
             try:
                 editor_state = st.session_state.pending_changes
@@ -211,37 +211,28 @@ def render_ui(default_spreadsheet_id):
 
                 filtered_df["id"] = filtered_df["id"].astype(str)
 
-                # 1. Process Deletions
                 if deleted_rows:
                     for row_idx in deleted_rows:
                         if row_idx < len(filtered_df):
                             expense_id = str(filtered_df.iloc[row_idx]["id"])
                             if expense_id and expense_id != "nan":
-                                del_resp = requests.delete(f"{API_URL}/expenses/{expense_id}", headers=request_headers, timeout=2)
-                        else:
-                            st.error(f"❌ Deletion index out of bounds matching data row index {row_idx}.")
+                                requests.delete(f"{API_URL}/expenses/{expense_id}", headers=request_headers, timeout=2)
 
-                # 2. Process Modifications
                 if edited_rows:
                     for row_idx_str, changes in edited_rows.items():
                         row_idx = int(row_idx_str)
                         if row_idx >= len(filtered_df):
-                            st.error(f"❌ Index Mismatch: Row index {row_idx} is out of bounds for current view.")
                             continue
-                            
                         orig_row = filtered_df.iloc[row_idx]
                         expense_id = str(orig_row["id"])
-
                         payload = {
                             "date": str(changes.get("date", orig_row["date"])),
                             "category": changes.get("category", orig_row["category"]),
                             "amount": float(changes.get("amount", orig_row["amount"])),
                             "description": changes.get("description", orig_row["description"])
                         }
-                        
                         requests.put(f"{API_URL}/expenses/{expense_id}", json=payload, headers=request_headers, timeout=2)
 
-                # 3. Process Additions
                 if added_rows:
                     for new_row in added_rows:
                         payload = {
@@ -256,7 +247,6 @@ def render_ui(default_spreadsheet_id):
                 st.session_state.pending_changes = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
                 st.session_state.needs_data_refresh = True
                 st.rerun()
-                    
             except Exception as e:
                 st.error(f"💥 Sync Pipeline Interrupted: {e}")
 
@@ -306,7 +296,6 @@ def render_ui(default_spreadsheet_id):
                         except Exception as e:
                             st.error(f"Insight Generation Failed: {e}")
                 
-                # Render report if it exists in state
                 if st.session_state.recommendation_report:
                     st.markdown(st.session_state.recommendation_report)
 
@@ -331,22 +320,24 @@ def render_ui(default_spreadsheet_id):
             user_input = st.chat_input("Ask your AI Agent or enter a new expense...")
             if user_input:
                 st.session_state.messages.append({"role": "user", "content": user_input})
-                st.session_state.processing_chat = True
                 st.rerun()
 
-    # Async Process Thread Control
-    if "messages" in st.session_state and len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user" and st.session_state.processing_chat:
+    # Synchronous state loop execution logic (Removes async thread content blocks)
+    if "messages" in st.session_state and len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
         latest_user_query = st.session_state.messages[-1]["content"]
         active_chat_context = chat_col if chat_col else st.container()
         with active_chat_context:
             with st.spinner("AI Agent thinking..."):
                 try:
                     response = requests.post(f"{API_URL}/chat", json={"message": latest_user_query}, headers=request_headers, timeout=10)
-                    assistant_reply = response.json().get("response", "Done.") if response.status_code == 200 else "⚠️ Server error."
+                    if response.status_code == 200:
+                        assistant_reply = response.json().get("response", "Done.")
+                    else:
+                        assistant_reply = f"⚠️ Server error status: {response.status_code}"
                 except Exception as e:
                     assistant_reply = f"❌ Connection Error: {e}"
 
                 st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
-                st.session_state.processing_chat = False
+                # Trigger a single explicit structural reload safely without double-dipping flags
                 st.session_state.needs_data_refresh = True
                 st.rerun()
