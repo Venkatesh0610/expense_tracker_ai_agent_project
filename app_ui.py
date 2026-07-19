@@ -1,4 +1,3 @@
-# app_ui.py
 import uuid
 import requests
 import pandas as pd
@@ -21,6 +20,8 @@ def render_ui(default_spreadsheet_id):
         st.session_state.cached_df = None
     if "needs_data_refresh" not in st.session_state:
         st.session_state.needs_data_refresh = True
+    if "recommendation_report" not in st.session_state:
+        st.session_state.recommendation_report = ""
         
     # DELTA STATE HOLDING CONTAINER: Prevents button clicks from clearing edits
     if "pending_changes" not in st.session_state:
@@ -215,24 +216,21 @@ def render_ui(default_spreadsheet_id):
                     for row_idx in deleted_rows:
                         if row_idx < len(filtered_df):
                             expense_id = str(filtered_df.iloc[row_idx]["id"])
-                            
                             if expense_id and expense_id != "nan":
                                 del_resp = requests.delete(f"{API_URL}/expenses/{expense_id}", headers=request_headers, timeout=2)
-                                st.write(f"📡 Delete Response Status: {del_resp.status_code}")
                         else:
                             st.error(f"❌ Deletion index out of bounds matching data row index {row_idx}.")
 
-                # 2. Process Modifications (Iterates dynamically through multiple altered rows)
+                # 2. Process Modifications
                 if edited_rows:
                     for row_idx_str, changes in edited_rows.items():
                         row_idx = int(row_idx_str)
-                        
                         if row_idx >= len(filtered_df):
                             st.error(f"❌ Index Mismatch: Row index {row_idx} is out of bounds for current view.")
                             continue
                             
                         orig_row = filtered_df.iloc[row_idx]
-                        expense_id = str(orig_row["id"]) # Normalized to read smoothly from data rows without throwing key errors
+                        expense_id = str(orig_row["id"])
 
                         payload = {
                             "date": str(changes.get("date", orig_row["date"])),
@@ -240,35 +238,21 @@ def render_ui(default_spreadsheet_id):
                             "amount": float(changes.get("amount", orig_row["amount"])),
                             "description": changes.get("description", orig_row["description"])
                         }
-            
                         
-                        put_resp = requests.put(f"{API_URL}/expenses/{expense_id}", json=payload, headers=request_headers, timeout=2)
-                        
-                        if put_resp.status_code == 200:
-                            st.success(f"✅ Expense {expense_id} updated successfully on backend.")
-                        else:
-                            st.error(f"❌ Backend failed to update row {expense_id}. API Status Code: {put_resp.status_code}, Response: {put_resp.text}")
+                        requests.put(f"{API_URL}/expenses/{expense_id}", json=payload, headers=request_headers, timeout=2)
 
                 # 3. Process Additions
                 if added_rows:
-                    for i, new_row in enumerate(added_rows):
+                    for new_row in added_rows:
                         payload = {
                             "date": str(new_row.get("date", pd.Timestamp.now().date())),
                             "category": new_row.get("category", "Others"),
                             "amount": float(new_row.get("amount", 0.0)),
                             "description": new_row.get("description", "")
                         }
-                        
-                        post_resp = requests.post(f"{API_URL}/expenses", json=payload, headers=request_headers, timeout=2)
-                        
-                        if post_resp.status_code in [200, 201]:
-                            st.success(f"✅ New entry added successfully.")
-                        else:
-                            st.error(f"❌ Backend rejected addition. Status: {post_resp.status_code}, Response: {post_resp.text}")
+                        requests.post(f"{API_URL}/expenses", json=payload, headers=request_headers, timeout=2)
 
                 st.toast("✅ Database synchronization processing completed!", icon="🔥")
-                
-                # Reset container tracking allocations
                 st.session_state.pending_changes = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
                 st.session_state.needs_data_refresh = True
                 st.rerun()
@@ -303,6 +287,7 @@ def render_ui(default_spreadsheet_id):
 
             st.markdown("<br>", unsafe_allow_html=True)
 
+            # --- Persistent AI Insight Display ---
             with st.expander("🧠 Deep AI Financial Recommendations", expanded=False):
                 if st.button("✨ Generate Custom Recommendation Report", use_container_width=True, type="secondary"):
                     with st.spinner("Analyzing current transactions..."):
@@ -315,12 +300,15 @@ def render_ui(default_spreadsheet_id):
                             if insight_response.status_code == 200:
                                 raw_reply = insight_response.json().get("response", "")
                                 if isinstance(raw_reply, dict):
-                                    recommendation_text = raw_reply.get("text", str(raw_reply))
+                                    st.session_state.recommendation_report = raw_reply.get("text", str(raw_reply))
                                 else:
-                                    recommendation_text = str(raw_reply)
-                                
+                                    st.session_state.recommendation_report = str(raw_reply)
                         except Exception as e:
                             st.error(f"Insight Generation Failed: {e}")
+                
+                # Render report if it exists in state
+                if st.session_state.recommendation_report:
+                    st.markdown(st.session_state.recommendation_report)
 
     # Chat Engine Panel
     if chat_col and st.session_state.show_chat:
