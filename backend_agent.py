@@ -247,10 +247,18 @@ def add_expense_route(payload: dict = Body(...), x_sheet_id: str = Header(None, 
 
 @app.put("/expenses/{expense_id}")
 def update_expense_route(expense_id: str, payload: dict = Body(...), x_sheet_id: str = Header(None, alias="X-Sheet-ID")):
+    print("---------------------------",expense_id,payload)
     sheet_id = x_sheet_id or DEFAULT_SPREADSHEET_ID
     try:
         db = ExpenseDatabase(spreadsheet_id=sheet_id)
-        return db.update_expense(expense_id=expense_id, **payload)
+        
+        # 🚨 THE FIX: Remove 'date' from the payload copy so it doesn't break the method signature
+        db_payload = payload.copy()
+        db_payload.pop("date", None) 
+        
+        # Now it safely unpacks only amount, category, and description
+        return db.update_expense(expense_id=expense_id, **db_payload)
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

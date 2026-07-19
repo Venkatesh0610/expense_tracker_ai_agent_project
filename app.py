@@ -45,7 +45,6 @@ else:
             print("❌ [Env Check] Missing header/footer boundaries inside 'private_key'.")
     except json.JSONDecodeError as e:
         print(f"❌ [Env Check] String found, but it is NOT valid JSON. Parse Error: {e}")
-print("----------------------------------------")
 # --- DIAGNOSTIC LOG MATRIX END ---
 
 
