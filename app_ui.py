@@ -319,25 +319,21 @@ def render_ui(default_spreadsheet_id):
 
             user_input = st.chat_input("Ask your AI Agent or enter a new expense...")
             if user_input:
+                # 1. Immediately append the user message to history so it renders
                 st.session_state.messages.append({"role": "user", "content": user_input})
-                st.rerun()
+                
+                # 2. Synchronously hit the backend right here inside the layout column context
+                with st.spinner("AI Agent thinking..."):
+                    try:
+                        response = requests.post(f"{API_URL}/chat", json={"message": user_input}, headers=request_headers, timeout=10)
+                        if response.status_code == 200:
+                            assistant_reply = response.json().get("response", "Done.")
+                        else:
+                            assistant_reply = f"⚠️ Server error status: {response.status_code}"
+                    except Exception as e:
+                        assistant_reply = f"❌ Connection Error: {e}"
 
-    # Synchronous state loop execution logic (Removes async thread content blocks)
-    if "messages" in st.session_state and len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
-        latest_user_query = st.session_state.messages[-1]["content"]
-        active_chat_context = chat_col if chat_col else st.container()
-        with active_chat_context:
-            with st.spinner("AI Agent thinking..."):
-                try:
-                    response = requests.post(f"{API_URL}/chat", json={"message": latest_user_query}, headers=request_headers, timeout=10)
-                    if response.status_code == 200:
-                        assistant_reply = response.json().get("response", "Done.")
-                    else:
-                        assistant_reply = f"⚠️ Server error status: {response.status_code}"
-                except Exception as e:
-                    assistant_reply = f"❌ Connection Error: {e}"
-
+                # 3. Append assistant response and trigger data refresh flags cleanly
                 st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
-                # Trigger a single explicit structural reload safely without double-dipping flags
                 st.session_state.needs_data_refresh = True
                 st.rerun()
