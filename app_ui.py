@@ -5,6 +5,13 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import os
+import warnings
+
+# Ignore all DeprecationWarnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Or ignore UserWarnings (Streamlit often uses UserWarning for parameter deprecations)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # Adaptable URL for Local vs Cloud Deployment
 API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:8000")
@@ -313,7 +320,17 @@ def render_ui(default_spreadsheet_id):
                         if isinstance(content, dict) and "text" in content:
                             st.markdown(content["text"])
                             if "data" in content and content["data"]:
-                                st.dataframe(pd.DataFrame(content["data"]), width="stretch", hide_index=True)
+
+                                data_payload = content["data"]
+                                # Wrap a single dictionary inside a list so pandas can build a single-row DataFrame
+                                if isinstance(data_payload, dict):
+                                    data_payload = [data_payload]
+                                
+                                try:
+                                    df_to_display = pd.DataFrame(data_payload)
+                                    st.dataframe(df_to_display, use_container_width=True, hide_index=True)
+                                except Exception as err:
+                                    st.write(data_payload)  # Fallback gracefully if parsing fails
                         else:
                             st.markdown(str(content))
 
