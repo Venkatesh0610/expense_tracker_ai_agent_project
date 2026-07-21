@@ -1,6 +1,6 @@
 import os
 import uuid
-import json  # Added for parsing raw JSON strings
+import json
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
@@ -18,22 +18,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SERVICE_ACCOUNT_ENV = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = "Sheet1"
+
+
 class ExpenseDatabase:
     def __init__(self, spreadsheet_id=None):
-        # Authenticate using either a file path or a raw JSON string
         if not SERVICE_ACCOUNT_ENV:
             raise ValueError("❌ Error: GOOGLE_CREDENTIALS_JSON environment variable is completely empty or missing.")
 
         try:
-            # Scenario A: Check if the string points to a physical file path layout
             if os.path.exists(SERVICE_ACCOUNT_ENV):
                 creds = Credentials.from_service_account_file(
                     SERVICE_ACCOUNT_ENV,
                     scopes=["https://www.googleapis.com/auth/spreadsheets"]
                 )
                 logger.info(f"📡 Authenticated via local keyfile path: {SERVICE_ACCOUNT_ENV}")
-            
-            # Scenario B: Assume it is a raw credentials JSON string matrix
             else:
                 creds_info = json.loads(SERVICE_ACCOUNT_ENV)
                 creds = Credentials.from_service_account_info(
@@ -41,33 +39,22 @@ class ExpenseDatabase:
                     scopes=["https://www.googleapis.com/auth/spreadsheets"]
                 )
                 logger.info("📡 Authenticated via raw GOOGLE_CREDENTIALS_JSON configuration string.")
-                
         except json.JSONDecodeError:
             raise ValueError(
                 f"❌ Authentication Failed: GOOGLE_CREDENTIALS_JSON does not target a valid file path, "
-                f"nor could it be parsed as a raw JSON dictionary matrix. Value trace snippet: {SERVICE_ACCOUNT_ENV[:30]}..."
+                f"nor could it be parsed as a raw JSON dictionary matrix."
             )
         except Exception as auth_err:
             raise RuntimeError(f"❌ Structural authentication error: {auth_err}")
 
-        # Build service setup downstream
-        service = build(
-            "sheets",
-            "v4",
-            credentials=creds
-        )
-
+        service = build("sheets", "v4", credentials=creds)
         self.sheet = service.spreadsheets()
-        
-        # Prioritizes the passed runtime ID. Falls back to .env if empty/None.
         self.spreadsheet_id = spreadsheet_id or DEFAULT_SPREADSHEET_ID
         
         if not self.spreadsheet_id:
             logger.warning("Warning: No Spreadsheet ID provided or found in environment variables.")
-
-        logger.info(f"Connected to Google Sheets ID: {self.spreadsheet_id}")
-        
-        if self.spreadsheet_id:
+        else:
+            logger.info(f"Connected to Google Sheets ID: {self.spreadsheet_id}")
             self.create_header_if_not_exists()
 
     def create_header_if_not_exists(self):
@@ -99,14 +86,16 @@ class ExpenseDatabase:
 
     def add_expense(self, amount, category, description=""):
         expense_id = str(uuid.uuid4())[:8]
+        today_date = datetime.now().strftime("%Y-%m-%d")
+        
         expense = [
             expense_id,
-            datetime.now().strftime("%Y-%m-%d"),
-            category,
-            amount,
-            description
+            today_date,
+            str(category).capitalize(),
+            float(amount),
+            str(description)
         ]
-        logger.info(f"Adding Expense : {expense}")
+        logger.info(f"Adding Expense: {expense}")
         
         self.sheet.values().append(
             spreadsheetId=self.spreadsheet_id,
@@ -116,8 +105,9 @@ class ExpenseDatabase:
             body={"values": [expense]}
         ).execute()
 
-        return {"status": "success", "expense_id": expense_id}
-        
+        desc_part = f" for {description}" if description else ""
+        return f"SUCCESS: Added ₹{amount} in {category}{desc_part}."
+
     def get_expenses(self):
         logger.info("Fetching expenses.")
         try:
@@ -133,10 +123,10 @@ class ExpenseDatabase:
             expenses = []
             for row in values[1:]:
                 expenses.append({
-                    "expense_id": row[0],
-                    "date": row[1],
-                    "category": row[2],
-                    "amount": float(row[3]) if len(row) > 3 else 0.0,
+                    "expense_id": row[0] if len(row) > 0 else "",
+                    "date": row[1] if len(row) > 1 else "",
+                    "category": row[2] if len(row) > 2 else "",
+                    "amount": float(row[3]) if len(row) > 3 and row[3] else 0.0,
                     "description": row[4] if len(row) > 4 else ""
                 })
             logger.info(f"{len(expenses)} expenses found.")
@@ -146,14 +136,30 @@ class ExpenseDatabase:
             return []
     
     def get_last_expense(self):
+        """Returns the last expense object for internal agent tool calls."""
         logger.info("Fetching last expense.")
         expenses = self.get_expenses()
         if not expenses:
-            return {"message": "No expenses found."}
+            return None
         return expenses[-1]
-    
-    def update_expense(self, expense_id, amount=None, category=None, description=None):
-        logger.info(f"Updating Expense : {expense_id}")
+
+    def resolve_expense_id(self, target_id=None):
+        """
+        Helper method to grab either a specific expense_id or default to the most recent one.
+        Prevents tools from failing when the LLM passes 'latest' or leaves ID empty.
+        """
+        if target_id and target_id.lower() not in ["latest", "last", "recent", "none", ""]:
+            return target_id
+        
+        last = self.get_last_expense()
+        return last["expense_id"] if last else None
+
+    def update_expense(self, expense_id=None, amount=None, category=None, description=None):
+        resolved_id = self.resolve_expense_id(expense_id)
+        if not resolved_id:
+            return "ERROR: No expense available to update."
+
+        logger.info(f"Updating Expense ID: {resolved_id}")
         result = self.sheet.values().get(
             spreadsheetId=self.spreadsheet_id,
             range=f"{SHEET_NAME}!A:E"
@@ -161,19 +167,19 @@ class ExpenseDatabase:
         values = result.get("values", [])
 
         if len(values) <= 1:
-            return None
+            return "ERROR: No expenses available in records."
 
         for row_number, row in enumerate(values[1:], start=2):
-            if row[0] == expense_id:
+            if len(row) > 0 and row[0] == resolved_id:
                 if category is not None:
-                    row[2] = category
+                    row[2] = str(category).capitalize()
                 if amount is not None:
                     row[3] = str(amount)
                 if description is not None:
                     if len(row) < 5:
-                        row.append(description)
+                        row.append(str(description))
                     else:
-                        row[4] = description
+                        row[4] = str(description)
 
                 self.sheet.values().update(
                     spreadsheetId=self.spreadsheet_id,
@@ -181,14 +187,18 @@ class ExpenseDatabase:
                     valueInputOption="RAW",
                     body={"values": [row]}
                 ).execute()
-                logger.info("Expense Updated Successfully.")
-                return {"status": "success", "expense_id": expense_id}
+                logger.info("Expense updated successfully.")
+                return "SUCCESS: Updated the expense record."
 
-        logger.warning("Expense ID not found.")
-        return None 
-    
-    def delete_expense(self, expense_id):
-        logger.info(f"Deleting Expense : {expense_id}")
+        logger.warning(f"Expense ID {resolved_id} not found.")
+        return "ERROR: Targeted expense record could not be found."
+
+    def delete_expense(self, expense_id=None):
+        resolved_id = self.resolve_expense_id(expense_id)
+        if not resolved_id:
+            return "ERROR: No expense available to delete."
+
+        logger.info(f"Deleting Expense ID: {resolved_id}")
         result = self.sheet.values().get(
             spreadsheetId=self.spreadsheet_id,
             range=f"{SHEET_NAME}!A:E"
@@ -196,43 +206,49 @@ class ExpenseDatabase:
         values = result.get("values", [])
 
         if len(values) <= 1:
-            return False
+            return "ERROR: No expenses available to delete."
 
-        updated_rows = [values[0]]
-        deleted = False
+        target_row_index = None
+        for idx, row in enumerate(values[1:], start=1):
+            if len(row) > 0 and row[0] == resolved_id:
+                target_row_index = idx
+                break
 
-        for row in values[1:]:
-            if row[0] == expense_id:
-                deleted = True
-                continue
-            updated_rows.append(row)
-
-        if deleted:
-            self.sheet.values().clear(
+        if target_row_index is not None:
+            body = {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": 0,
+                                "dimension": "ROWS",
+                                "startIndex": target_row_index,
+                                "endIndex": target_row_index + 1
+                            }
+                        }
+                    }
+                ]
+            }
+            self.sheet.batchUpdate(
                 spreadsheetId=self.spreadsheet_id,
-                range=f"{SHEET_NAME}!A:E"
+                body=body
             ).execute()
+            logger.info("Expense row deleted via batchUpdate successfully.")
+            return "SUCCESS: Deleted the expense record."
 
-            self.sheet.values().update(
-                spreadsheetId=self.spreadsheet_id,
-                range=f"{SHEET_NAME}!A:E",
-                valueInputOption="RAW",
-                body={"values": updated_rows}
-            ).execute()
-            logger.info("Expense Deleted Successfully.")
+        return "ERROR: Targeted expense record could not be found."
 
-        return deleted
-    
     def total_spending(self):
         logger.info("Calculating Total Spending.")
         expenses = self.get_expenses()
-        return sum(expense["amount"] for expense in expenses)
+        total = sum(expense["amount"] for expense in expenses)
+        return f"Total spending across all recorded expenses is ₹{total:,.2f}."
     
     def category_summary(self):
         logger.info("Generating Category Summary.")
         expenses = self.get_expenses()
         summary = {}
         for expense in expenses:
-            category = expense["category"]
-            summary[category] = summary.get(category, 0) + expense["amount"]
+            cat = expense["category"] or "Uncategorized"
+            summary[cat] = summary.get(cat, 0.0) + expense["amount"]
         return summary

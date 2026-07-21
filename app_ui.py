@@ -1,4 +1,3 @@
-# app_ui.py
 import uuid
 import requests
 import pandas as pd
@@ -9,8 +8,6 @@ import warnings
 
 # Ignore all DeprecationWarnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-# Or ignore UserWarnings (Streamlit often uses UserWarning for parameter deprecations)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # Adaptable URL for Local vs Cloud Deployment
@@ -30,6 +27,8 @@ def render_ui(default_spreadsheet_id):
         st.session_state.needs_data_refresh = True
     if "recommendation_report" not in st.session_state:
         st.session_state.recommendation_report = ""
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "assistant", "content": "👋 Hi! Tell me what you spent or ask about your expenses."}]
         
     # DELTA STATE HOLDING CONTAINER: Prevents button clicks from clearing edits
     if "pending_changes" not in st.session_state:
@@ -98,7 +97,7 @@ def render_ui(default_spreadsheet_id):
     # Data Synchronization Pipeline
     if st.session_state.needs_data_refresh or st.session_state.cached_df is None:
         try:
-            response = requests.get(f"{API_URL}/expenses", headers=request_headers, timeout=5)
+            response = requests.get(f"{API_URL}/expenses", headers=request_headers, timeout=50)
             if response.status_code == 200:
                 raw_data = response.json()
                 expenses = raw_data.get("expenses", []) if isinstance(raw_data, dict) else raw_data
@@ -223,7 +222,7 @@ def render_ui(default_spreadsheet_id):
                         if row_idx < len(filtered_df):
                             expense_id = str(filtered_df.iloc[row_idx]["id"])
                             if expense_id and expense_id != "nan":
-                                requests.delete(f"{API_URL}/expenses/{expense_id}", headers=request_headers, timeout=2)
+                                requests.delete(f"{API_URL}/expenses/{expense_id}", headers=request_headers, timeout=50)
 
                 if edited_rows:
                     for row_idx_str, changes in edited_rows.items():
@@ -238,7 +237,7 @@ def render_ui(default_spreadsheet_id):
                             "amount": float(changes.get("amount", orig_row["amount"])),
                             "description": changes.get("description", orig_row["description"])
                         }
-                        requests.put(f"{API_URL}/expenses/{expense_id}", json=payload, headers=request_headers, timeout=2)
+                        requests.put(f"{API_URL}/expenses/{expense_id}", json=payload, headers=request_headers, timeout=50)
 
                 if added_rows:
                     for new_row in added_rows:
@@ -248,7 +247,7 @@ def render_ui(default_spreadsheet_id):
                             "amount": float(new_row.get("amount", 0.0)),
                             "description": new_row.get("description", "")
                         }
-                        requests.post(f"{API_URL}/expenses", json=payload, headers=request_headers, timeout=2)
+                        requests.post(f"{API_URL}/expenses", json=payload, headers=request_headers, timeout=50)
 
                 st.toast("✅ Database synchronization processing completed!", icon="🔥")
                 st.session_state.pending_changes = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
@@ -293,7 +292,7 @@ def render_ui(default_spreadsheet_id):
                             f"Total spending is ₹{total_spend:,.2f} spread across {total_count} transactions."
                         )
                         try:
-                            insight_response = requests.post(f"{API_URL}/chat", json={"message": telemetry_context}, headers=request_headers, timeout=12)
+                            insight_response = requests.post(f"{API_URL}/chat", json={"message": telemetry_context}, headers=request_headers, timeout=600)
                             if insight_response.status_code == 200:
                                 raw_reply = insight_response.json().get("response", "")
                                 if isinstance(raw_reply, dict):
@@ -310,47 +309,60 @@ def render_ui(default_spreadsheet_id):
     if chat_col and st.session_state.show_chat:
         with chat_col:
             st.markdown("### 🤖 AI Agent Chat")
-            if "messages" not in st.session_state:
-                st.session_state.messages = [{"role": "assistant", "content": "👋 Hi! Tell me what you spent or ask about your expenses."}]
 
-            with st.container(height=545, border=True):
+            # 1. Outer Chat Container (Fixes layout containment)
+            chat_box = st.container(height=545, border=True)
+
+            # Helper function to format message content
+            def render_msg_body(content):
+                if isinstance(content, dict) and "text" in content:
+                    st.markdown(content["text"])
+                    if "data" in content and content["data"]:
+                        data_payload = content["data"]
+                        if isinstance(data_payload, dict):
+                            data_payload = [data_payload]
+                        try:
+                            df_to_display = pd.DataFrame(data_payload)
+                            st.dataframe(df_to_display, width="stretch", hide_index=True)
+                        except Exception:
+                            st.write(data_payload)
+                else:
+                    st.markdown(str(content))
+
+            # 2. Render Existing Chat Messages Inside Container
+            with chat_box:
                 for message in st.session_state.messages:
                     with st.chat_message(message["role"]):
-                        content = message["content"]
-                        if isinstance(content, dict) and "text" in content:
-                            st.markdown(content["text"])
-                            if "data" in content and content["data"]:
+                        render_msg_body(message["content"])
 
-                                data_payload = content["data"]
-                                # Wrap a single dictionary inside a list so pandas can build a single-row DataFrame
-                                if isinstance(data_payload, dict):
-                                    data_payload = [data_payload]
-                                
-                                try:
-                                    df_to_display = pd.DataFrame(data_payload)
-                                    st.dataframe(df_to_display, use_container_width=True, hide_index=True)
-                                except Exception as err:
-                                    st.write(data_payload)  # Fallback gracefully if parsing fails
-                        else:
-                            st.markdown(str(content))
-
+            # 3. Handle User Input & Process Response INSIDE the Container Context
             user_input = st.chat_input("Ask your AI Agent or enter a new expense...")
             if user_input:
-                # 1. Immediately append the user message to history so it renders
-                st.session_state.messages.append({"role": "user", "content": user_input})
-                
-                # 2. Synchronously hit the backend right here inside the layout column context
-                with st.spinner("AI Agent thinking..."):
-                    try:
-                        response = requests.post(f"{API_URL}/chat", json={"message": user_input}, headers=request_headers, timeout=10)
-                        if response.status_code == 200:
-                            assistant_reply = response.json().get("response", "Done.")
-                        else:
-                            assistant_reply = f"⚠️ Server error status: {response.status_code}"
-                    except Exception as e:
-                        assistant_reply = f"❌ Connection Error: {e}"
+                # Instantly display user input in the chatbox
+                with chat_box:
+                    with st.chat_message("user"):
+                        st.markdown(user_input)
+                    
+                    # Display spinner inside the chatbox while waiting for response
+                    with st.chat_message("assistant"):
+                        with st.spinner("AI Agent thinking..."):
+                            try:
+                                response = requests.post(
+                                    f"{API_URL}/chat", 
+                                    json={"message": user_input}, 
+                                    headers=request_headers, 
+                                    timeout=600
+                                )
+                                print(response)
+                                if response.status_code == 200:
+                                    assistant_reply = response.json().get("response", "Done.")
+                                else:
+                                    assistant_reply = f"⚠️ Something went wrong, please try again"
+                            except Exception as e:
+                                assistant_reply = f"❌ Connection Error: {e}"
 
-                # 3. Append assistant response and trigger data refresh flags cleanly
+                # Append both messages to state for session persistence
+                st.session_state.messages.append({"role": "user", "content": user_input})
                 st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
                 st.session_state.needs_data_refresh = True
                 st.rerun()
