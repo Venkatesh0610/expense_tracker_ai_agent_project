@@ -82,3 +82,4 @@ expense_tracker.json
 *.swo
 
 AI_Agent_Expense_Tracker_Medium_Blog.docx
+.devcontainer
